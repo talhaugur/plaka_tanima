@@ -74,7 +74,7 @@ int main() {
         while (1) {
             int lazer = lazer_durumu_oku();
 
-            if (lazer == 0) { 
+            if (lazer == 1) { 
                 printf("[UYARI] Araç algılandı! Kapı KAPANAMAZ.\n");
             } else {
                 printf("[TEMİZ] Lazer hattı net. Araç geçti veya yok.\n");
@@ -82,7 +82,7 @@ int main() {
                 sleep(2);
                 
                 // Son bir güvenlik kontrolü daha
-                if (lazer_durumu_oku() != 0) {
+                if (lazer_durumu_oku() != 1) {
                     break; 
                 }
             }
