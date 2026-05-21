@@ -1,47 +1,49 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 int main() {
-    // gpiod araçlarının sistemde kurulu olup olmadığını kontrol edelim
-    // Eğer kurulu değilse arka planda otomatik kurmaya çalışır
-    system("command -v gpioget >/dev/null 2>&1 || (sudo apt update && sudo apt install gpiod -y)");
-
     printf("=========================================\n");
     printf("=== Akıllı Plaka Tetikleme Sistemi Aktif ===\n");
     printf("Lazer hattı izleniyor. Kesinti bekleniyor...\n");
     printf("=========================================\n");
 
-    int last_state = 1; // Başlangıçta lazer açık varsayıyoruz
-    char buffer[10];
+    int last_state = 1; // Başlangıçta lazer hattı çekili (1) varsayıyoruz
+    char buffer[128];
 
     while (1) {
-        // gpioget komutu ile GPIO 17 pinini doğrudan okuyoruz
-        // Bu yöntem hem Pi 4 hem Pi 5 ile tam uyumludur ve kilitlenme yapmaz
-        FILE *fp = popen("gpioget gpiochip4 17 2>/dev/null || gpioget gpiochip0 17", "r");
+        // gpioget komutunu en güncel ve akıllı parametreyle çağırıyoruz.
+        // --find parametresi sayesinde çip numarasını (gpiochipX) sistem kendi bulur.
+        FILE *fp = popen("gpioget --find 17 2>/dev/null", "r");
         if (fp == NULL) {
-            perror("Pin okunurken hata oluştu");
+            perror("Pin okuma komutu başlatılamadı");
             break;
         }
 
         if (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            int current_state = buffer[0] - '0'; // 0 veya 1
+            // Çıkan sonucun ilk karakterini alıyoruz (0 veya 1)
+            int current_state = buffer[0] - '0'; 
 
-            // Lazer önceden vuruyordu (1), şimdi kesildi (0)
-            if (current_state == 0 && last_state == 1) {
-                printf("\n[ALERT] Lazer Kesildi! Araç Geçiyor...\n");
-                printf("[CAMERA] Tetikleme sinyali gönderildi!\n");
-                last_state = 0;
-            } 
-            // Araç geçti, lazer tekrar LDR'nin üzerine düştü (1)
-            else if (current_state == 1 && last_state == 0) {
-                printf("[INFO] Lazer Hattı Tekrar Net. Sistem Hazır.\n");
-                last_state = 1;
+            // Değerin geçerli (0 veya 1) olduğundan emin olalım
+            if (current_state == 0 || current_state == 1) {
+                
+                // Lazer önceden vuruyordu (1), şimdi kesildi (0)
+                if (current_state == 0 && last_state == 1) {
+                    printf("\n[ALERT] Lazer Kesildi! Araç Geçiyor...\n");
+                    printf("[CAMERA] Tetikleme sinyali gönderildi!\n");
+                    last_state = 0;
+                } 
+                // Araç geçti, lazer tekrar LDR'nin üzerine düştü (1)
+                else if (current_state == 1 && last_state == 0) {
+                    printf("[INFO] Lazer Hattı Tekrar Net. Sistem Hazır.\n");
+                    last_state = 1;
+                }
             }
         }
         pclose(fp);
 
-        // İşlemciyi yormamak için 50ms bekle
+        // İşlemciyi yormamak için 50ms bekle (Örnekleme hızı)
         usleep(50000); 
     }
 
