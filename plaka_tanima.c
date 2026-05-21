@@ -1,50 +1,77 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
-int main() {
-    printf("=========================================\n");
-    printf("=== Akıllı Plaka Tetikleme Sistemi Aktif ===\n");
-    printf("Lazer hattı izleniyor. Kesinti bekleniyor...\n");
-    printf("=========================================\n");
+// Kolaylık olsun diye terminalden servoyu kontrol eden fonksiyonlar
+void kapiyi_ac() {
+    printf("[SERVO] Kapı açılıyor (90 derece)...\n");
+    // Raspberry Pi 4/5 için donanımsal PWM komutu (GPIO 18)
+    system("pinctrl set 18 op dh 2>/dev/null || gpio -g write 18 1"); 
+}
 
-    int last_state = 1; // Başlangıçta lazer hattı çekili (1) varsayıyoruz
+void kapiyi_kapat() {
+    printf("[SERVO] Güvenli. Kapı kapanıyor (0 derece).\n");
+    system("pinctrl set 18 op dl 2>/dev/null || gpio -g write 18 0");
+}
+
+int lazer_durumu_oku() {
     char buffer[128];
-
-    while (1) {
-        // gpioget komutunu en güncel ve akıllı parametreyle çağırıyoruz.
-        // --find parametresi sayesinde çip numarasını (gpiochipX) sistem kendi bulur.
-        FILE *fp = popen("gpioget --find 17 2>/dev/null", "r");
-        if (fp == NULL) {
-            perror("Pin okuma komutu başlatılamadı");
-            break;
-        }
-
+    // GPIO 17'den anlık lojik değeri okur
+    FILE *fp = popen("gpioget --find 17 2>/dev/null", "r");
+    if (fp != NULL) {
         if (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            // Çıkan sonucun ilk karakterini alıyoruz (0 veya 1)
-            int current_state = buffer[0] - '0'; 
-
-            // Değerin geçerli (0 veya 1) olduğundan emin olalım
-            if (current_state == 0 || current_state == 1) {
-                
-                // Lazer önceden vuruyordu (1), şimdi kesildi (0)
-                if (current_state == 0 && last_state == 1) {
-                    printf("\n[ALERT] Lazer Kesildi! Araç Geçiyor...\n");
-                    printf("[CAMERA] Tetikleme sinyali gönderildi!\n");
-                    last_state = 0;
-                } 
-                // Araç geçti, lazer tekrar LDR'nin üzerine düştü (1)
-                else if (current_state == 1 && last_state == 0) {
-                    printf("[INFO] Lazer Hattı Tekrar Net. Sistem Hazır.\n");
-                    last_state = 1;
-                }
-            }
+            pclose(fp);
+            return buffer[0] - '0'; // 0 veya 1 döner
         }
         pclose(fp);
+    }
+    return 1; // Hata durumunda güvenli tarafta kalmak için 1 dönelim
+}
 
-        // İşlemciyi yormamak için 50ms bekle (Örnekleme hızı)
-        usleep(50000); 
+int main() {
+    // Servo pini ayarı (GPIO 18 Çıkış olarak ayarlanıyor)
+    system("pinctrl set 18 op 2>/dev/null");
+
+    printf("==================================================\n");
+    printf("=== Otopark Bariyeri & Güvenlik Sistemi Aktif ===\n");
+    printf("==================================================\n");
+
+    // Başlangıçta kapıyı kapalı tutalım
+    kapiyi_kapat();
+
+    while (1) {
+        printf("\n[SİSTEM] (Simülasyon) Plaka okundu saymak ve kapıyı açmak için ENTER'a bas...\n");
+        getchar(); // Kullanıcının enter'a basmasını bekler (İleride burası kamera tetiklemesi olacak)
+
+        kapiyi_ac();
+        usleep(1000000); // Kapının açılması için 1 saniye bekle
+
+        printf("[GÜVENLİK] Araç geçişi bekleniyor, lazer hattı devrede...\n");
+
+        // Araç geçene kadar bu döngüde çakılı kalacağız
+        while (1) {
+            int lazer = lazer_durumu_oku();
+
+            // Eğer senin modül ters mantıksa buradaki '0'ı '1' yapabilirsin
+            if (lazer == 0) { 
+                printf("[UYARI] Araç algılandı (Lazer Kesik)! Kapı KAPANAMAZ.\n");
+            } else {
+                printf("[TEMİZ] Lazer hattı net. Araç geçti veya henüz girmedi.\n");
+                
+                // Güvenlik amacıyla hat netleştikten sonra 2 saniye daha bekleyelim
+                printf("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...\n");
+                sleep(2);
+                
+                // Son bir kez daha kontrol edelim, tam kapanırken araç gelmiş mi?
+                if (lazer_durumu_oku() == 1) {
+                    break; // İç döngüden çık, yani kapıyı kapatmaya git
+                }
+            }
+            usleep(500000); // Her yarım saniyede bir kontrol et
+        }
+
+        kapiyi_kapat();
+        printf("[SİSTEM] Döngü başa dönüyor.\n");
     }
 
     return 0;
