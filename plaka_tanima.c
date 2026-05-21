@@ -1,11 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
-// Kolaylık olsun diye terminalden servoyu kontrol eden fonksiyonlar
 void kapiyi_ac() {
     printf("[SERVO] Kapı açılıyor (90 derece)...\n");
-    // Raspberry Pi 4/5 için donanımsal PWM komutu (GPIO 18)
     system("pinctrl set 18 op dh 2>/dev/null || gpio -g write 18 1"); 
 }
 
@@ -14,64 +13,69 @@ void kapiyi_kapat() {
     system("pinctrl set 18 op dl 2>/dev/null || gpio -g write 18 0");
 }
 
+// Yeni ve hatasız pin okuma fonksiyonu
 int lazer_durumu_oku() {
-    char buffer[128];
-    // GPIO 17'den anlık lojik değeri okur
-    FILE *fp = popen("gpioget --find 17 2>/dev/null", "r");
+    char buffer[256];
+    int state = 1; // Varsayılan durum
+
+    // pinctrl ile GPIO 17'nin durumunu sorguluyoruz
+    FILE *fp = popen("pinctrl get 17 2>/dev/null", "r");
     if (fp != NULL) {
-        if (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            pclose(fp);
-            return buffer[0] - '0'; // 0 veya 1 döner
+        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+            // Çıktının içinde "hi" (High/1) veya "lo" (Low/0) kelimelerini arıyoruz
+            if (strstr(buffer, "hi") != NULL) {
+                state = 1;
+            } else if (strstr(buffer, "lo") != NULL) {
+                state = 0;
+            }
         }
         pclose(fp);
     }
-    return 1; // Hata durumunda güvenli tarafta kalmak için 1 dönelim
+    return state;
 }
 
 int main() {
-    // Servo pini ayarı (GPIO 18 Çıkış olarak ayarlanıyor)
+    // Pin yönlendirmelerini yapıyoruz (17 Giriş, 18 Çıkış)
+    system("pinctrl set 17 ip 2>/dev/null");
     system("pinctrl set 18 op 2>/dev/null");
 
     printf("==================================================\n");
     printf("=== Otopark Bariyeri & Güvenlik Sistemi Aktif ===\n");
     printf("==================================================\n");
 
-    // Başlangıçta kapıyı kapalı tutalım
     kapiyi_kapat();
 
     while (1) {
-        printf("\n[SİSTEM] (Simülasyon) Plaka okundu saymak ve kapıyı açmak için ENTER'a bas...\n");
-        getchar(); // Kullanıcının enter'a basmasını bekler (İleride burası kamera tetiklemesi olacak)
+        printf("\n[SİSTEM] (Simülasyon) Kapıyı açmak için ENTER'a bas...\n");
+        getchar(); 
 
         kapiyi_ac();
-        usleep(1000000); // Kapının açılması için 1 saniye bekle
+        usleep(1000000); // 1 saniye açılma payı
 
-        printf("[GÜVENLİK] Araç geçişi bekleniyor, lazer hattı devrede...\n");
+        printf("[GÜVENLİK] Lazer hattı devrede, araç kontrol ediliyor...\n");
 
-        // Araç geçene kadar bu döngüde çakılı kalacağız
         while (1) {
             int lazer = lazer_durumu_oku();
 
-            // Eğer senin modül ters mantıksa buradaki '0'ı '1' yapabilirsin
+            // SENSÖR KONTROLÜ: Eğer lazeri kestiğinde "[UYARI]" yerine "[TEMİZ]" diyorsa, 
+            // modülün ters mantıktır. O zaman aşağıdaki '== 0' kısmını '== 1' yapman gerekir.
             if (lazer == 0) { 
-                printf("[UYARI] Araç algılandı (Lazer Kesik)! Kapı KAPANAMAZ.\n");
+                printf("[UYARI] Araç algılandı (Lazer Durumu: LO)! Kapı KAPANAMAZ.\n");
             } else {
-                printf("[TEMİZ] Lazer hattı net. Araç geçti veya henüz girmedi.\n");
-                
-                // Güvenlik amacıyla hat netleştikten sonra 2 saniye daha bekleyelim
+                printf("[TEMİZ] Lazer hattı net (Lazer Durumu: HI).\n");
                 printf("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...\n");
                 sleep(2);
                 
-                // Son bir kez daha kontrol edelim, tam kapanırken araç gelmiş mi?
-                if (lazer_durumu_oku() == 1) {
-                    break; // İç döngüden çık, yani kapıyı kapatmaya git
+                // Kapanmadan hemen önce son kontrol
+                if (lazer_durumu_oku() != 0) {
+                    break; 
                 }
             }
-            usleep(500000); // Her yarım saniyede bir kontrol et
+            usleep(500000); // Yarım saniyede bir döngü
         }
 
         kapiyi_kapat();
-        printf("[SİSTEM] Döngü başa dönüyor.\n");
+        printf("[SİSTEM] Döngü başa döndü.\n");
     }
 
     return 0;
