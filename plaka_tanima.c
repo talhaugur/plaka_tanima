@@ -1,66 +1,62 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
-#include <gpiod.h>
-
-#define CONSUMER "Plaka_Tetikleyici"
-#define GPIO_PIN 17  // LDR sinyalinin bağlı olduğu GPIO pini
+#include <fcntl.h>
 
 int main() {
-    struct gpiod_chip *chip;
-    struct gpiod_line *line;
-    int line_value;
-    int last_state = 1; // Başlangıçta lazer açık (Lojik 1) varsayıyoruz
-
-    // GPIO çipini aç (Raspberry Pi 4 ve 5 için genellikle "gpiochip4" veya "gpiochip0")
-    chip = gpiod_chip_open_by_number(0); 
-    if (!chip) {
-        perror("GPIO Çipi açılamadı! (Alternatif olarak open_by_name deneyin)");
-        return 1;
+    // GPIO 17 pinini sisteme açıyoruz (Export)
+    int export_fd = open("/sys/class/gpio/export", O_WRONLY);
+    if (export_fd >= 0) {
+        write(export_fd, "17", 2);
+        close(export_fd);
     }
 
-    // İlgili pini al
-    line = gpiod_chip_get_line(chip, GPIO_PIN);
-    if (!line) {
-        perror("Pin alınamadı");
-        gpiod_chip_close(chip);
+    // Sistemin pini hazırlaması için çok kısa bir bekleme
+    usleep(100000); 
+
+    // Pini GİRİŞ (in) olarak ayarlıyoruz
+    int dir_fd = open("/sys/class/gpio/gpio17/direction", O_WRONLY);
+    if (dir_fd < 0) {
+        perror("GPIO yönü ayarlanamadı! Lütfen sudo ile çalıştırmayı deneyin.");
         return 1;
     }
+    write(dir_fd, "in", 2);
+    close(dir_fd);
 
-    // Pini GİRİŞ (Input) olarak ayarla
-    if (gpiod_line_request_input(line, CONSUMER) < 0) {
-        perror("Pin giriş olarak ayarlanamadı");
-        gpiod_chip_close(chip);
-        return 1;
-    }
+    int val_fd;
+    char value;
+    int last_state = 1; // Başlangıçta lazer hattı çekili (1) varsayıyoruz
 
+    printf("=========================================\n");
     printf("=== Akıllı Plaka Tetikleme Sistemi Aktif ===\n");
-    printf("Lazer hattı izleniyor...\n");
+    printf("Lazer hattı izleniyor. Kesinti bekleniyor...\n");
+    printf("=========================================\n");
 
     while (1) {
-        // Pindeki anlık değeri oku (1 veya 0)
-        line_value = gpiod_line_get_value(line);
+        // Pin değerini okuyoruz
+        val_fd = open("/sys/class/gpio/gpio17/value", O_RDONLY);
+        if (val_fd >= 0) {
+            read(val_fd, &value, 1);
+            close(val_fd);
+        }
 
-        if (line_value == 0 && last_state == 1) {
-            // Lazer önceden vuruyordu (1), şimdi kesildi (0)
+        int current_state = value - '0'; // Karakteri sayıya (0 veya 1) çevir
+
+        // Lazer önceden vuruyordu (1), şimdi kesildi (0)
+        if (current_state == 0 && last_state == 1) {
             printf("\n[ALERT] Lazer Kesildi! Araç Geçiyor...\n");
-            printf("[CAMERA] Tetikleme sinyali gönderildi! Fotoğraf çekiliyor...\n");
-            
-            // Buraya ileride kamera geldikten sonra fotoğraf çekme fonksiyonunu ekleyeceksin.
-            
+            printf("[CAMERA] Tetikleme sinyali gönderildi!\n");
             last_state = 0;
         } 
-        else if (line_value == 1 && last_state == 0) {
-            // Araç geçti, lazer tekrar LDR'nin üzerine düştü
+        // Araç geçti, lazer tekrar LDR'nin üzerine düştü (1)
+        else if (current_state == 1 && last_state == 0) {
             printf("[INFO] Lazer Hattı Tekrar Net. Sistem Hazır.\n");
             last_state = 1;
         }
 
-        // İşlemciyi yormamak için 50 milisaniye bekle (Örnekleme hızı)
+        // İşlemciyi yormamak için 50ms bekle (Örnekleme hızı)
         usleep(50000); 
     }
 
-    // Program kapanırsa (Ctrl+C) kaynakları temizle
-    gpiod_line_release(line);
-    gpiod_chip_close(chip);
     return 0;
 }
