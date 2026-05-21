@@ -1,78 +1,103 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <pigpio.h> // Kurduğumuz canavar kütüphane
+#include <pigpio.h>
 
-#define LDR_PIN   17  // LDR Modülünün DO pini (GPIO 17)
-#define SERVO_PIN 18  // Servonun Sinyal kablosu (GPIO 18)
+#define LDR_PIN   17  // LDR Modülünün DO pini
+#define SERVO_PIN 18  // Servonun Sinyal kablosu
+
+// Kalibre ettiğin tam açılar (Önceki adıma göre revize edebilirsin)
+#define KAPI_ACIK_PWM   1650  // 90 derece pozisyonu
+#define KAPI_KAPALI_PWM  700  // 0 derece pozisyonu
 
 void kapiyi_ac() {
-    printf("\n[SERVO] Kapı pürüzsüz şekilde açılıyor (90 derece)...\n");
-    // pigpio arka planda işlemcinin donanımsal saatini kullanır.
-    // 1500us darbe genişliği servoyu tam 90 dereceye pürüzsüzce taşır.
-    gpioServo(SERVO_PIN, 1500); 
+    printf("\n[SERVO] Kapı HIZLA açılıyor (Güvenlik Önceliği)...\n");
+    // Sıkışma ihtimaline karşı açılma her zaman tam güç ve hızlı olmalı
+    gpioServo(SERVO_PIN, KAPI_ACIK_PWM); 
 }
 
-void kapiyi_kapat() {
-    printf("[SERVO] Güvenli. Kapı pürüzsüz şekilde kapanıyor (0 derece).\n");
-    // 1000us darbe genişliği servoyu 0 dereceye (başlangıç pozisyonu) getirir.
-    gpioServo(SERVO_PIN, 1000);
+// Yeni akıllı ve yavaş kapanma fonksiyonu
+// Eğer kapanırken lazer kesilirse 1 döner (sıkışma var), sorunsuz kapanırsa 0 döner.
+int kapiyi_yavas_kapat_ve_koru() {
+    printf("[SERVO] Güvenli bölge. Kapı yavaşça kapanıyor...\n");
+
+    // Açık pozisyondan kapalı pozisyona doğru adım adım gidiyoruz
+    for (int pwm = KAPI_ACIK_PWM; pwm >= KAPI_KAPALI_PWM; pwm -= 10) {
+        
+        // Her adımda LDR'yi kontrol et
+        if (gpioRead(LDR_PIN) == 0) { // Lazer kesildiyse (Araç/Engel var!)
+            printf("\n[ACİL DURUM] Kapanma esnasında engel algılandı! Kapanma iptal!\n");
+            kapiyi_ac(); // Kapıyı derhal geri aç
+            return 1;    // Sıkışma algılandı sinyali gönder
+        }
+
+        gpioServo(SERVO_PIN, pwm);
+        
+        // Bu bekleme süresi kapanma hızını belirler. 
+        // 20000us (20ms) idealdir. Yavaşlatmak istersen 30000 yapabilirsin.
+        usleep(20000); 
+    }
+    
+    return 0; // Sorunsuz kapandı
 }
 
 int main() {
-    // pigpio kütüphanesini başlatıyoruz
     if (gpioInitialise() < 0) {
         fprintf(stderr, "HATA: pigpio kütüphanesi başlatılamadı!\n");
         return 1;
     }
 
-    // Pinlerin yönlerini kütüphane fonksiyonlarıyla tanımlıyoruz
     gpioSetMode(LDR_PIN, PI_INPUT);
     gpioSetMode(SERVO_PIN, PI_OUTPUT);
 
-    printf("==================================================\n");
-    printf("===  pigpio Altyapılı Profesyonel Bariyer Sistemi ===\n");
-    printf("==================================================\n");
+    printf("=========================================================\n");
+    printf("=== Endüstriyel Sıkışma Önleyicili Bariyer Sistemi ===\n");
+    printf("=========================================================\n");
 
-    // Sistem ilk açıldığında kapıyı kapalı pozisyona çekelim
-    kapiyi_kapat();
+    // İlk açılışta kapıyı kapalı tut
+    gpioServo(SERVO_PIN, KAPI_KAPALI_PWM);
 
     while (1) {
         printf("\n[SİSTEM] Kapıyı açmak için ENTER'a bas...\n");
-        getchar(); // İleride burası kamera tetiklemesi olacak
+        getchar(); 
 
         kapiyi_ac();
-        sleep(1); // Servonun hareketini tamamlaması için 1 saniye pürüzsüz bekle
+        sleep(1); // Açılma hareketi tamamlansın
 
-        printf("[GÜVENLİK] Lazer hattı devrede, araç kontrol ediliyor...\n");
-
+        // İlk araç geçiş beklemesi (Kapı açıkken)
+        printf("[GÜVENLİK] Araç geçişi bekleniyor...\n");
         while (1) {
-            // LDR durumunu kütüphane üzerinden doğrudan okuyoruz (Hızlı ve stabil)
-            int lazer = gpioRead(LDR_PIN); 
-
-            // Eğer lazeri kestiğinde "[UYARI]" yerine "[TEMİZ]" yazıyorsa modülün ters mantıktır.
-            // O zaman aşağıdaki '== 0' koşulunu '== 1' yapman gerekir.
-            if (lazer == 1) { 
-                printf("[UYARI] Araç algılandı (Lazer Hattı Kesik)! Kapı KAPANAMAZ.\n");
+            if (gpioRead(LDR_PIN) == 0) { 
+                printf("[UYARI] Araç şu an kapının altında. Bekleniyor...\n");
             } else {
-                printf("[TEMİZ] Lazer hattı net. Araç geçti veya alan boş.\n");
-                printf("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...\n");
+                printf("[TEMİZ] Alt alan boşaldı. 2 saniye sonra kapanma başlayacak...\n");
                 sleep(2);
                 
-                // Kapanmadan hemen önce son bir güvenlik kontrolü daha yapıyoruz
-                if (gpioRead(LDR_PIN) != 1) {
-                    break; // Eğer hâlâ temizse iç döngüden çık ve kapıyı kapatmaya git
+                // Kapanma emri verilmeden hemen önce son kontrol
+                if (gpioRead(LDR_PIN) != 0) {
+                    break; 
                 }
             }
-            usleep(100000); // 100ms'de bir (saniyede 10 kez) çok akıcı kontrol
+            usleep(200000);
         }
 
-        kapiyi_kapat();
-        sleep(1); // Kapanma tamamlansın
-        printf("[SİSTEM] Döngü başa döndü, sonraki araç bekleniyor.\n");
+        // Kapıyı kapatmayı dene ve sıkışma kontrolü yap
+        // Eğer fonksiyon 1 dönerse engel var demektir, döngü başa sarar ve kapı açık kalır
+        while (kapiyi_yavas_kapat_ve_koru() == 1) {
+            printf("[SİSTEM] Engel temizlenene kadar kapı açık bekletiliyor...\n");
+            
+            // Engel kalkana kadar burada bekle
+            while (gpioRead(LDR_PIN) == 0) {
+                usleep(200000);
+            }
+            
+            printf("[SİSTEM] Engel kalktı. Yeniden kapatma deneniyor...\n");
+            sleep(2); // Güvenlik amacıyla tekrar kapatmadan önce 2 saniye bekle
+        }
+
+        printf("[SİSTEM] Kapı başarıyla kapandı. Sonraki araç bekleniyor.\n");
     }
 
-    // Program bir şekilde sonlanırsa kütüphaneyi güvenli kapat
     gpioTerminate();
     return 0;
 }
