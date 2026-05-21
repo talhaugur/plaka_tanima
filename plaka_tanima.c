@@ -95,3 +95,22 @@ int main() {
 
     return 0;
 }
+
+
+# 1. Kütüphanenin kaynak kodunu internetten çekiyoruz
+wget https://github.com/joan2937/pigpio/archive/master.zip
+
+# 2. İndirdiğimiz sıkıştırılmış dosyayı açıyoruz
+unzip master.zip
+
+# 3. Klasörün içine giriyoruz
+cd pigpio-master
+
+# 4. Derleme işlemini başlatıyoruz
+make
+
+# 5. Derlenen kütüphaneyi sisteme kalıcı olarak yüklüyoruz
+sudo make install
+
+# 6. Ana klasörümüze geri dönüyoruz
+cd ..
