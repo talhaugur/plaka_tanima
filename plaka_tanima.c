@@ -3,19 +3,34 @@
 #include <unistd.h>
 #include <string.h>
 
-// Servo motorların pürüzsüz dönmesi için pinctrl PWM fonksiyonu
+// Yazılımsal pürüzsüz sinyal üretici fonksiyon
+// milisaniye cinsinden (1.0ms = 0 derece, 1.5ms = 90 derece)
+void servo_konum_ayarla(int konum_ms) {
+    int acik_kalma_suresi = konum_ms;                 // Mikro saniye (1000 veya 1500)
+    int kapali_kalma_suresi = 20000 - acik_kalma_suresi; // Toplam periyot 20ms (50Hz)
+
+    // Motorun o konuma gitmeye vakit bulması için sinyali 25 kez tekrarlıyoruz
+    for (int i = 0; i < 25; i++) {
+        // Pini HIGH (1) yap
+        system("pinctrl set 18 op dh 2>/dev/null || gpio -g write 18 1");
+        usleep(acik_kalma_suresi);
+
+        // Pini LOW (0) yap
+        system("pinctrl set 18 op dl 2>/dev/null || gpio -g write 18 0");
+        usleep(kapali_kalma_suresi);
+    }
+}
+
 void kapiyi_ac() {
-    printf("\n[SERVO] Kapı pürüzsüz şekilde açılıyor (90 derece)...\n");
-    // GPIO 18 pininde 50Hz frekansta %7.5 duty cycle (1.5ms sinyal genişliği) üretir.
-    // Bu komut servoyu tam 90 dereceye pürüzsüzce döndürür.
-    system("pinctrl set 18 pwm f50 p7.5 2>/dev/null"); 
+    printf("\n[SERVO] Kapı açılıyor (90 derece)...\n");
+    // 90 derece için sinyal genişliği 1500 mikro saniyedir
+    servo_konum_ayarla(1500); 
 }
 
 void kapiyi_kapat() {
-    printf("[SERVO] Güvenli. Kapı pürüzsüz şekilde kapanıyor (0 derece).\n");
-    // GPIO 18 pininde 50Hz frekansta %5 duty cycle (1.0ms sinyal genişliği) üretir.
-    // Bu komut servoyu tam 0 dereceye pürüzsüzce döndürür.
-    system("pinctrl set 18 pwm f50 p5.0 2>/dev/null");
+    printf("[SERVO] Güvenli. Kapı kapanıyor (0 derece).\n");
+    // 0 derece için sinyal genişliği 1000 mikro saniyedir
+    servo_konum_ayarla(1000);
 }
 
 int lazer_durumu_oku() {
@@ -37,14 +52,15 @@ int lazer_durumu_oku() {
 }
 
 int main() {
-    // LDR Pin Ayarı (GPIO 17 Giriş)
+    // Pin yönlendirmelerini yapıyoruz (17 Giriş, 18 Çıkış)
     system("pinctrl set 17 ip 2>/dev/null");
+    system("pinctrl set 18 op 2>/dev/null");
 
     printf("==================================================\n");
-    printf("===  Pinctrl PWM Destekli Akıllı Bariyer  ===\n");
+    printf("===   Yazılımsal Hassas Bariyer Sistemi Aktif   ===\n");
     printf("==================================================\n");
 
-    // Başlangıçta kapıyı kapalı pozisyona getir
+    // Başlangıçta kapıyı kapat
     kapiyi_kapat();
 
     while (1) {
@@ -52,14 +68,12 @@ int main() {
         getchar(); 
 
         kapiyi_ac();
-        sleep(1); // Servonun dönme hareketini tamamlaması için bekle
 
         printf("[GÜVENLİK] Lazer hattı devrede, araç kontrol ediliyor...\n");
 
         while (1) {
             int lazer = lazer_durumu_oku();
 
-            // LDR modülün lazeri kestiğinde LO veriyorsa araç var demektir
             if (lazer == 0) { 
                 printf("[UYARI] Araç algılandı! Kapı KAPANAMAZ.\n");
             } else {
@@ -67,16 +81,15 @@ int main() {
                 printf("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...\n");
                 sleep(2);
                 
-                // Kapanmadan hemen önce son bir güvenlik kontrolü daha yap
+                // Son bir güvenlik kontrolü daha
                 if (lazer_durumu_oku() != 0) {
                     break; 
                 }
             }
-            usleep(300000); // 300ms'de bir kontrol et
+            usleep(300000); 
         }
 
         kapiyi_kapat();
-        sleep(1); // Kapanma hareketi tamamlansın
         printf("[SİSTEM] Döngü başa döndü.\n");
     }
 
