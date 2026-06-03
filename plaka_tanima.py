@@ -2,31 +2,44 @@ import os
 import subprocess
 import time
 import requests
-from gpiozero import PWMOutputDevice, DigitalInputDevice
-from gpiozero.pins.pigpio import PiGPIOFactory
+from gpiozero import OutputDevice, DigitalInputDevice
 
 # --- API AYARLARI ---
 API_TOKEN = "e8dbc6b3a35577a8af907c118920c24ae404d3bb" 
 
-# --- SERVO (PULSE TIME) KALİBRASYONU ---
-# Hobi servoları 50Hz (20ms periyot) ile çalışır.
-# Aşağıdaki değerler doğrudan motorun dönüş sınırlarını belirler:
-KAPALI_SINYAL = 0.05  # Yaklaşık 1.0ms (0 derece - Kapalı)
-ACIK_SINYAL = 0.11    # Yaklaşık 2.0ms (Tam 90 derece açısı için)
-# NOT: Eğer hala 90 dereceye ulaşmazsa ACIK_SINYAL değerini 0.11 veya 0.12 yap!
-# Eğer 90 dereceyi geçerse ACIK_SINYAL değerini 0.09 yap.
+# --- STEP MOTOR AYARLARI ---
+# ULN2003 motor sürücü kartının pinleri
+PIN_IN1 = 18
+PIN_IN2 = 23
+PIN_IN3 = 24
+PIN_IN4 = 25
 
-BARIYER_HIZI = 0.0008  # Adımlar arası bekleme süresi (Pürüzsüzlük ayarı)
+step_pins = [
+    OutputDevice(PIN_IN1),
+    OutputDevice(PIN_IN2),
+    OutputDevice(PIN_IN3),
+    OutputDevice(PIN_IN4)
+]
 
-# --- DONANIM AYARLARI ---
-try:
-    factory = PiGPIOFactory()
-    # Servo pinini doğrudan PWM (Sinyal Süresi) cihazı olarak tanımlıyoruz (Frekans: 50Hz)
-    servo = PWMOutputDevice(18, frequency=50, pin_factory=factory)
-except OSError:
-    print("[HATA] pigpio servisi arka planda çalışmıyor! Terminale 'sudo pigpiod' yazın.")
-    exit(1)
+# 28BYJ-48 motoru için yarım adım (Half-step) dizilimi (En pürüzsüz dönüş)
+step_sequence = [
+    [1,0,0,0],
+    [1,1,0,0],
+    [0,1,0,0],
+    [0,1,1,0],
+    [0,0,1,0],
+    [0,0,1,1],
+    [0,0,0,1],
+    [1,0,0,1]
+]
 
+# Kalibrasyon Ayarları: 
+# 28BYJ-48 tam turu (360 derece) 4096 adımdır. Çeyrek tur (90 derece) = 1024 adım.
+# Eğer kapı 90 dereceyi biraz geçerse bu değeri 1000 yap, eksik kalırsa 1050 yap.
+ADIM_90_DERECE = 1024 
+MOTOR_HIZI = 0.001 # Adımlar arası bekleme süresi (Küçüldükçe bariyer hızlanır)
+
+# --- SENSÖR AYARLARI ---
 LDR_PIN = 17
 ldr = DigitalInputDevice(LDR_PIN)
 
@@ -34,35 +47,33 @@ ldr = DigitalInputDevice(LDR_PIN)
 GECERLI_PLAKA = "02ABG585"
 GECICI_RESIM = "plaka.jpg"
 
-# Başlangıçta mevcut sinyal durumunu tutuyoruz
-su_anki_sinyal = KAPALI_SINYAL
-servo.value = KAPALI_SINYAL
-
-# Sinyal değerini mikroskobik adımlarla değiştirerek pürüzsüz hareket sağlıyoruz
-def pruzsuz_hareket_et(hedef_sinyal):
-    global su_anki_sinyal
-    
-    # Sinyalin artacağını mı azalacağını mı belirliyoruz
-    adim = 0.001 if hedef_sinyal > su_anki_sinyal else -0.001
-    
-    # Hedef sinyal değerine ulaşana kadar küçük adımlarla ilerle
-    while abs(su_anki_sinyal - hedef_sinyal) > 0.0005:
-        su_anki_sinyal += adim
-        servo.value = su_anki_sinyal
-        time.sleep(BARIYER_HIZI)
-        
-    # Tam değere eşitle
-    su_anki_sinyal = hedef_sinyal
-    servo.value = hedef_sinyal
+def motoru_dondur(adim_sayisi, yon):
+    """yon: 1 ise açılma (saat yönü), -1 ise kapanma (tersi)"""
+    for _ in range(adim_sayisi):
+        for step in range(8):
+            # Yöne göre dizilimde ileri veya geri gidiyoruz
+            seq_index = step if yon == 1 else (7 - step)
+            for pin_num in range(4):
+                if step_sequence[seq_index][pin_num] == 1:
+                    step_pins[pin_num].on()
+                else:
+                    step_pins[pin_num].off()
+            time.sleep(MOTOR_HIZI)
 
 def kapiyi_ac():
-    print("\n[SERVO] Kapı KALİBRE EDİLMİŞ sinyal ile açılıyor (Tam 90 derece)...")
-    pruzsuz_hareket_et(ACIK_SINYAL)
+    print("\n[STEP MOTOR] Bariyer pürüzsüzce 90 derece YUKARI kaldırılıyor...")
+    motoru_dondur(ADIM_90_DERECE, yon=1)
+    # Motor açık pozisyonda beklerken kolun düşmemesi için enerjiyi kesmiyoruz (tutunma torku devrede)
 
 def kapiyi_kapat():
-    print("[SERVO] Güvenli. Kapı KALİBRE EDİLMİŞ sinyal ile kapanıyor (0 derece)...")
-    pruzsuz_hareket_et(KAPALI_SINYAL)
+    print("[STEP MOTOR] Güvenli. Bariyer pürüzsüzce AŞAĞI indiriliyor...")
+    motoru_dondur(ADIM_90_DERECE, yon=-1)
+    
+    # Motor kapalı pozisyondayken ısınıp bozulmaması için tüm pinlerin enerjisini kesiyoruz
+    for pin in step_pins:
+        pin.off()
 
+# === KAMERA VE YAPAY ZEKA KISMI (HİÇ DOKUNULMADI) ===
 def plaka_kontrol_et():
     print("\n[KAMERA] Analiz için anlık fotoğraf yakalanıyor...")
     
@@ -115,10 +126,12 @@ def plaka_kontrol_et():
 
 def main():
     print("==================================================")
-    print("===  PWM Sinyal Kalibrasyonlu Bariyer Sistemi  ===")
+    print("===  Step Motorlu Profesyonel Bariyer Sistemi  ===")
     print("==================================================")
     
-    kapiyi_kapat()
+    # Motorun mevcut konumunu "kapalı" (sıfır noktası) olarak kabul et
+    for pin in step_pins:
+        pin.off()
     
     print("[KAMERA] Canlı video akışı başlatılıyor...")
     cmd_video = "DISPLAY=:0 rpicam-vid -t 0 --width 640 --height 480 --inline --preview 0,0,640,480 &"
@@ -160,7 +173,9 @@ def main():
     except KeyboardInterrupt:
         print("\n[SİSTEM] Program kapatılıyor...")
     finally:
-        servo.value = 0 # Motorun enerjisini kes (titremeyi önler)
+        # Kapatırken motorun enerjisini kes
+        for pin in step_pins:
+            pin.off()
         subprocess.run("pkill rpicam-vid", shell=True)
         print("[SİSTEM] Kamera kapatıldı, çıkış yapılıyor.")
 
