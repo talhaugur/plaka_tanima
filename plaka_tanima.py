@@ -20,20 +20,21 @@ step_pins = [OutputDevice(PIN_IN1), OutputDevice(PIN_IN2), OutputDevice(PIN_IN3)
 step_sequence = [[1,0,0,0], [1,1,0,0], [0,1,0,0], [0,1,1,0], [0,0,1,0], [0,0,1,1], [0,0,0,1], [1,0,0,1]]
 
 ADIM_90_DERECE = 128 
-MOTOR_HIZI = 0.001 
+# DÜZELTME: Motor hızı yavaşlatıldı (Daha tok ve premium bir açılış hissi için)
+MOTOR_HIZI = 0.0025 
 
 # --- SENSÖR (LDR) AYARLARI ---
 LDR_PIN = 17
 ldr = DigitalInputDevice(LDR_PIN)
-
-# DÜZELTME: Lazer kesildiğinde (araba varken) LDR modülü 1 verir. 
-# Lazer kesilmediğinde (araba yokken) 0 verir.
 LDR_ARABA_VAR = 1  
 
 # --- SİSTEM VE DOSYA AYARLARI ---
 GECICI_RESIM = "plaka.jpg"
 SON_GECIS_RESIM = "son_gecis.jpg" 
 PLAKA_DOSYASI = "plakalar.txt"
+
+# Web panelinden gelen manuel komutları yakalamak için global değişken
+global_komut = None
 
 sistem_durumu = {
     "son_plaka": "Henüz geçiş yok",
@@ -76,22 +77,35 @@ HTML_SABLON = """
         body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; color: #333; text-align: center; padding: 20px; }
         .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto 20px auto; }
         img { max-width: 100%; border-radius: 8px; border: 2px solid #ddd; }
-        .btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block;}
+        .btn-mavi { background: #007bff; }
+        .btn-gri { background: #6c757d; }
         .btn-sil { background: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 14px; }
         input { padding: 10px; width: 60%; border: 1px solid #ccc; border-radius: 5px; }
         ul { list-style: none; padding: 0; }
         li { background: #e9ecef; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; }
         .durum { font-size: 18px; font-weight: bold; color: #0056b3; }
+        .buton-grubu { display: flex; justify-content: space-around; margin-top: 15px; }
     </style>
 </head>
 <body>
     <h2>Akıllı Bariyer Yönetim Paneli</h2>
+    
+    <div class="card">
+        <h3>Manuel Kapı Kontrolü</h3>
+        <div class="buton-grubu">
+            <a href="/manuel/ac" class="btn btn-mavi">⬆️ Kapıyı Aç</a>
+            <a href="/manuel/kapat" class="btn btn-gri">⬇️ Kapıyı Kapat</a>
+        </div>
+    </div>
+
     <div class="card">
         <h3>Son İşlem Gören Araç</h3>
         <p class="durum">{{ sistem_durumu['durum'] }}</p>
         <p><b>Plaka:</b> {{ sistem_durumu['son_plaka'] }} <br> <b>Saat:</b> {{ sistem_durumu['son_zaman'] }}</p>
         <img src="/foto?{{ rand }}" alt="Son Araç Fotoğrafı">
     </div>
+    
     <div class="card">
         <h3>İzinli Plakalar Listesi</h3>
         <ul>
@@ -125,6 +139,16 @@ def ekle():
 @app.route("/sil/<plaka>")
 def sil(plaka):
     plaka_sil(plaka)
+    return "<script>window.location.href='/';</script>"
+
+# YENİ: Manuel Kontrol Komutlarını Yakalayan Fonksiyon
+@app.route("/manuel/<islem>")
+def manuel(islem):
+    global global_komut
+    if islem == "ac":
+        global_komut = "AC"
+    elif islem == "kapat":
+        global_komut = "KAPAT"
     return "<script>window.location.href='/';</script>"
 
 def web_sunucusunu_baslat():
@@ -210,8 +234,9 @@ def plaka_kontrol_et():
             
     return False
 
-# --- DÜZELTİLEN ANA DÖNGÜ (MAIN) ---
 def main():
+    global global_komut # Dışarıdan gelen web komutunu okumak için
+    
     print("==================================================")
     print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
     print("==================================================")
@@ -224,24 +249,47 @@ def main():
 
     try:
         while True:
-            print("\r[SİSTEM] Yeni araç bekleniyor...", end="", flush=True)
+            manuel_acildi = False
             
-            if not plaka_kontrol_et():
-                time.sleep(0.5) 
-                continue
+            # 1. Kontrol: Web'den manuel açma komutu geldi mi?
+            if global_komut == "AC":
+                manuel_acildi = True
+                global_komut = None
+                print("\n[WEB] Manuel AÇMA komutu tetiklendi!")
+                sistem_durumu["son_plaka"] = "Manuel Giriş"
+                sistem_durumu["son_zaman"] = time.strftime("%H:%M:%S")
+                sistem_durumu["durum"] = "WEB PANELİNDEN AÇILDI"
+            else:
+                # 2. Kontrol: Manuel komut yoksa normal plaka izlemeye devam et
+                print("\r[SİSTEM] Yeni araç bekleniyor...", end="", flush=True)
+                if not plaka_kontrol_et():
+                    time.sleep(0.5) 
+                    continue
 
-            print("\n[ONAY] Plaka yetkili! Kapı 90 derece açılıyor...")
+            if not manuel_acildi:
+                print("\n[ONAY] Plaka yetkili! Kapı açılıyor...")
+                
             kapiyi_ac()
 
             kapi_acik = True
             while kapi_acik:
-                print("[SİSTEM] 10 Saniye bekleme süresi başladı...")
-                time.sleep(10) 
+                print("[SİSTEM] 10 Sn otomatik bekleme başladı (Web'den hemen kapatabilirsiniz)...")
                 
-                # Araba kapının altında durduğu sürece (ldr.value == 1 iken) bu döngüde kalır ve kapanma tetiklenmez
+                # YENİ: 10 Saniyeyi 1'er saniyelik bloklara böldük ki manuel komut gelirse hemen yakalayalım
+                for _ in range(10):
+                    if global_komut == "KAPAT":
+                        print("\n[WEB] Manuel KAPATMA komutu tetiklendi, 10sn iptal edildi!")
+                        global_komut = None
+                        break # Döngüyü kır ve hemen kapatmaya geç
+                    time.sleep(1)
+                
+                # Araba kapının altında durduğu sürece
                 while ldr.value == LDR_ARABA_VAR:
-                    print("[UYARI] Süre doldu ama araç hala kapının altında! 5 Saniye sonra tekrar kontrol edilecek...")
-                    time.sleep(5)
+                    print("[UYARI] Süre doldu ama araç hala kapının altında! Bekleniyor...")
+                    time.sleep(2)
+                    if global_komut == "KAPAT":
+                        print("[WEB] Güvenlik İhlali: Araç varken manuel KAPANAMAZ!")
+                        global_komut = None # İptal et
                 
                 # Araba altından çekildiyse döngü kırılır ve buraya geçilir
                 print("[SİSTEM] Lazer hattı temiz. Kapı kapatılmaya başlanıyor...")
@@ -249,7 +297,8 @@ def main():
                     print("[SİSTEM] Kapı başarıyla kapandı.")
                     kapi_acik = False 
                 else:
-                    print("[SİSTEM] Kapanma esnasında güvenlik ihlali! Tekrar 10 saniye beklenecek...")
+                    print("[SİSTEM] Kapanma esnasında güvenlik ihlali! Tekrar beklenecek...")
+                    global_komut = None
 
     except KeyboardInterrupt:
         print("\n[SİSTEM] Kapatılıyor...")
