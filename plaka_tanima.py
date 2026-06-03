@@ -19,13 +19,17 @@ PIN_IN4 = 25
 step_pins = [OutputDevice(PIN_IN1), OutputDevice(PIN_IN2), OutputDevice(PIN_IN3), OutputDevice(PIN_IN4)]
 step_sequence = [[1,0,0,0], [1,1,0,0], [0,1,0,0], [0,1,1,0], [0,0,1,0], [0,0,1,1], [0,0,0,1], [1,0,0,1]]
 
-# DÜZELTME: 128 döngü x 8 adım = 1024 adım (Tam 90 Derece)
 ADIM_90_DERECE = 128 
 MOTOR_HIZI = 0.001 
 
-# --- SENSÖR AYARLARI ---
+# --- SENSÖR (LDR) AYARLARI ---
 LDR_PIN = 17
 ldr = DigitalInputDevice(LDR_PIN)
+
+# LDR Mantık Kalibrasyonu:
+# Eğer araba varken (lazer kesikken) sensör 0 veriyorsa burası 0 kalmalı.
+# Eğer araba varken 1 veriyorsa burayı 1 yapmalısın.
+LDR_ARABA_VAR = 0  
 
 # --- SİSTEM VE DOSYA AYARLARI ---
 GECICI_RESIM = "plaka.jpg"
@@ -131,8 +135,8 @@ def web_sunucusunu_baslat():
 def motoru_dondur(dongu_sayisi, yon, guvenlik_kontrolu=False):
     atilan_dongu = 0
     for _ in range(dongu_sayisi):
-        # YENİ MANTIK: Sadece kapanırken lazere bakar, lazer 0 ise araba var demektir, durur!
-        if guvenlik_kontrolu and ldr.value == 0:
+        # LDR Değişkenine göre güvenlik kontrolü (Araba varsa dur)
+        if guvenlik_kontrolu and ldr.value == LDR_ARABA_VAR:
             return atilan_dongu 
 
         for step in range(8):
@@ -154,10 +158,10 @@ def kapiyi_kapat():
     print("[SİSTEM] Kapı kapatılıyor...")
     sonuc = motoru_dondur(ADIM_90_DERECE, yon=-1, guvenlik_kontrolu=True)
     
-    # Eğer sonuc True dönmezse (yani araya araba girdiyse)
+    # Araba sensöre takıldıysa True dönmez.
     if sonuc is not True:
-        print("\n[ACİL DURUM] Lazer kesildi! Kapanma iptal edildi, kapı GERİ AÇILIYOR!")
-        motoru_dondur(sonuc, yon=1) # İnilen adım kadar geri yukarı çık
+        print("\n[ACİL DURUM] Araç algılandı! Kapı GERİ AÇILIYOR!")
+        motoru_dondur(sonuc, yon=1) # İnilen adım kadar yukarı çık
         return False 
     
     for pin in step_pins:
@@ -167,9 +171,14 @@ def kapiyi_kapat():
 def plaka_kontrol_et():
     if os.path.exists(GECICI_RESIM): os.remove(GECICI_RESIM)
 
+    # 1. HIZLANDIRMA: Uyku süresi 1 saniyeden 0.2 saniyeye düşürüldü.
     subprocess.run("pkill rpicam-vid", shell=True)
-    time.sleep(1) 
-    subprocess.run(f"rpicam-still -n --immediate -o {GECICI_RESIM}", shell=True) 
+    time.sleep(0.2) 
+    
+    # 2. HIZLANDIRMA: Fotoğraf çözünürlüğü 800x600 yapıldı. Anında çekip kaydeder.
+    cmd_capture = f"rpicam-still -n -t 10 --immediate --width 800 --height 600 -o {GECICI_RESIM}"
+    subprocess.run(cmd_capture, shell=True) 
+    
     subprocess.Popen("DISPLAY=:0 rpicam-vid -t 0 --width 640 --height 480 --inline --preview 0,0,640,480 &", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     if not os.path.exists(GECICI_RESIM): return False
@@ -177,9 +186,12 @@ def plaka_kontrol_et():
 
     with open(GECICI_RESIM, "rb") as fp:
         try:
+            # 3. HIZLANDIRMA: API'ye hızlı yüklenmesi için timeout ve optimize format kullanıldı.
             response = requests.post(
                 "https://api.platerecognizer.com/v1/plate-reader/",
-                data={"regions": "tr"}, files={"upload": fp}, headers={"Authorization": f"Token {API_TOKEN}"}
+                data={"regions": "tr"}, files={"upload": fp}, 
+                headers={"Authorization": f"Token {API_TOKEN}"},
+                timeout=10
             )
             
             if response.status_code in [200, 201]:
@@ -200,13 +212,13 @@ def plaka_kontrol_et():
                     sistem_durumu["son_plaka"] = "Okunamadı"
                     sistem_durumu["durum"] = "Plaka Tespit Edilemedi"
         except Exception as e:
-            print(f"[HATA] Bağlantı hatası: {e}")
+            print(f"[HATA] Bağlantı veya API Hatası: {e}")
             
     return False
 
 def main():
     print("==================================================")
-    print("===  10 Saniye Korumalı Bariyer Sistemi Aktif  ===")
+    print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
     print("==================================================")
     
     Thread(target=web_sunucusunu_baslat, daemon=True).start()
@@ -217,34 +229,31 @@ def main():
 
     try:
         while True:
-            print("\n[SİSTEM] Yeni araç bekleniyor...")
+            # Sadece bir nokta atışı print, gereksiz yavaşlamayı engeller.
+            print("\r[SİSTEM] Yeni araç bekleniyor...", end="", flush=True)
             
             if not plaka_kontrol_et():
-                time.sleep(2)
+                time.sleep(0.5) # Bekleme süresi çok daha kısa
                 continue
 
-            print("[ONAY] Plaka yetkili! Kapı 90 derece açılıyor...")
+            print("\n[ONAY] Plaka yetkili! Kapı 90 derece açılıyor...")
             kapiyi_ac()
 
-            # ANA MANTIK DEĞİŞİMİ: Kapı açık kaldığı sürece bu döngüde kalır
             kapi_acik = True
             while kapi_acik:
                 print("[SİSTEM] 10 Saniye bekleme süresi başladı...")
-                time.sleep(10) # Lazerden bağımsız dümdüz 10 saniye bekler
+                time.sleep(10) 
                 
-                # 10 saniye dolduktan sonra, eğer o anda araba kapının tam altındaysa hiç kapanmaya başlama
-                if ldr.value == 1:
+                # Eğer kapının altında araba varsa bekle, kapanmaya kalkışma
+                if ldr.value == LDR_ARABA_VAR:
                     print("[UYARI] Süre doldu ama araç kapının altında! 5 Saniye ek süre veriliyor...")
                     time.sleep(5)
                     continue
 
-                # Kapı kapanmayı dener
                 if kapiyi_kapat():
                     print("[SİSTEM] Kapı başarıyla kapandı.")
-                    kapi_acik = False # Kapandıysa döngüden çıkar ve kamerayı tekrar izlemeye başlar
+                    kapi_acik = False 
                 else:
-                    # Kapanırken araya araba girdiyse kapı zaten fonksiyon içinde tekrar havaya kalkar.
-                    # Biz de 10 saniye kuralını tekrar işletmesi için döngüyü başa sararız.
                     print("[SİSTEM] Güvenlik ihlali nedeniyle döngü başa alındı. Tekrar 10 sn beklenecek.")
 
     except KeyboardInterrupt:
