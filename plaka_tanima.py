@@ -26,10 +26,9 @@ MOTOR_HIZI = 0.001
 LDR_PIN = 17
 ldr = DigitalInputDevice(LDR_PIN)
 
-# LDR Mantık Kalibrasyonu:
-# Eğer araba varken (lazer kesikken) sensör 0 veriyorsa burası 0 kalmalı.
-# Eğer araba varken 1 veriyorsa burayı 1 yapmalısın.
-LDR_ARABA_VAR = 0  
+# DÜZELTME: Lazer kesildiğinde (araba varken) LDR modülü 1 verir. 
+# Lazer kesilmediğinde (araba yokken) 0 verir.
+LDR_ARABA_VAR = 1  
 
 # --- SİSTEM VE DOSYA AYARLARI ---
 GECICI_RESIM = "plaka.jpg"
@@ -135,7 +134,6 @@ def web_sunucusunu_baslat():
 def motoru_dondur(dongu_sayisi, yon, guvenlik_kontrolu=False):
     atilan_dongu = 0
     for _ in range(dongu_sayisi):
-        # LDR Değişkenine göre güvenlik kontrolü (Araba varsa dur)
         if guvenlik_kontrolu and ldr.value == LDR_ARABA_VAR:
             return atilan_dongu 
 
@@ -158,10 +156,9 @@ def kapiyi_kapat():
     print("[SİSTEM] Kapı kapatılıyor...")
     sonuc = motoru_dondur(ADIM_90_DERECE, yon=-1, guvenlik_kontrolu=True)
     
-    # Araba sensöre takıldıysa True dönmez.
     if sonuc is not True:
         print("\n[ACİL DURUM] Araç algılandı! Kapı GERİ AÇILIYOR!")
-        motoru_dondur(sonuc, yon=1) # İnilen adım kadar yukarı çık
+        motoru_dondur(sonuc, yon=1) 
         return False 
     
     for pin in step_pins:
@@ -171,11 +168,9 @@ def kapiyi_kapat():
 def plaka_kontrol_et():
     if os.path.exists(GECICI_RESIM): os.remove(GECICI_RESIM)
 
-    # 1. HIZLANDIRMA: Uyku süresi 1 saniyeden 0.2 saniyeye düşürüldü.
     subprocess.run("pkill rpicam-vid", shell=True)
     time.sleep(0.2) 
     
-    # 2. HIZLANDIRMA: Fotoğraf çözünürlüğü 800x600 yapıldı. Anında çekip kaydeder.
     cmd_capture = f"rpicam-still -n -t 10 --immediate --width 800 --height 600 -o {GECICI_RESIM}"
     subprocess.run(cmd_capture, shell=True) 
     
@@ -186,7 +181,6 @@ def plaka_kontrol_et():
 
     with open(GECICI_RESIM, "rb") as fp:
         try:
-            # 3. HIZLANDIRMA: API'ye hızlı yüklenmesi için timeout ve optimize format kullanıldı.
             response = requests.post(
                 "https://api.platerecognizer.com/v1/plate-reader/",
                 data={"regions": "tr"}, files={"upload": fp}, 
@@ -216,6 +210,7 @@ def plaka_kontrol_et():
             
     return False
 
+# --- DÜZELTİLEN ANA DÖNGÜ (MAIN) ---
 def main():
     print("==================================================")
     print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
@@ -229,11 +224,10 @@ def main():
 
     try:
         while True:
-            # Sadece bir nokta atışı print, gereksiz yavaşlamayı engeller.
             print("\r[SİSTEM] Yeni araç bekleniyor...", end="", flush=True)
             
             if not plaka_kontrol_et():
-                time.sleep(0.5) # Bekleme süresi çok daha kısa
+                time.sleep(0.5) 
                 continue
 
             print("\n[ONAY] Plaka yetkili! Kapı 90 derece açılıyor...")
@@ -244,17 +238,18 @@ def main():
                 print("[SİSTEM] 10 Saniye bekleme süresi başladı...")
                 time.sleep(10) 
                 
-                # Eğer kapının altında araba varsa bekle, kapanmaya kalkışma
-                if ldr.value == LDR_ARABA_VAR:
-                    print("[UYARI] Süre doldu ama araç kapının altında! 5 Saniye ek süre veriliyor...")
+                # Araba kapının altında durduğu sürece (ldr.value == 1 iken) bu döngüde kalır ve kapanma tetiklenmez
+                while ldr.value == LDR_ARABA_VAR:
+                    print("[UYARI] Süre doldu ama araç hala kapının altında! 5 Saniye sonra tekrar kontrol edilecek...")
                     time.sleep(5)
-                    continue
-
+                
+                # Araba altından çekildiyse döngü kırılır ve buraya geçilir
+                print("[SİSTEM] Lazer hattı temiz. Kapı kapatılmaya başlanıyor...")
                 if kapiyi_kapat():
                     print("[SİSTEM] Kapı başarıyla kapandı.")
                     kapi_acik = False 
                 else:
-                    print("[SİSTEM] Güvenlik ihlali nedeniyle döngü başa alındı. Tekrar 10 sn beklenecek.")
+                    print("[SİSTEM] Kapanma esnasında güvenlik ihlali! Tekrar 10 saniye beklenecek...")
 
     except KeyboardInterrupt:
         print("\n[SİSTEM] Kapatılıyor...")
