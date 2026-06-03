@@ -20,7 +20,6 @@ step_pins = [OutputDevice(PIN_IN1), OutputDevice(PIN_IN2), OutputDevice(PIN_IN3)
 step_sequence = [[1,0,0,0], [1,1,0,0], [0,1,0,0], [0,1,1,0], [0,0,1,0], [0,0,1,1], [0,0,0,1], [1,0,0,1]]
 
 ADIM_90_DERECE = 128 
-# DÜZELTME: Motor hızı yavaşlatıldı (Daha tok ve premium bir açılış hissi için)
 MOTOR_HIZI = 0.0025 
 
 # --- SENSÖR (LDR) AYARLARI ---
@@ -141,7 +140,6 @@ def sil(plaka):
     plaka_sil(plaka)
     return "<script>window.location.href='/';</script>"
 
-# YENİ: Manuel Kontrol Komutlarını Yakalayan Fonksiyon
 @app.route("/manuel/<islem>")
 def manuel(islem):
     global global_komut
@@ -201,7 +199,6 @@ def plaka_kontrol_et():
     subprocess.Popen("DISPLAY=:0 rpicam-vid -t 0 --width 640 --height 480 --inline --preview 0,0,640,480 &", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     if not os.path.exists(GECICI_RESIM): return False
-    shutil.copy(GECICI_RESIM, SON_GECIS_RESIM)
 
     with open(GECICI_RESIM, "rb") as fp:
         try:
@@ -214,7 +211,11 @@ def plaka_kontrol_et():
             
             if response.status_code in [200, 201]:
                 results = response.json().get("results", [])
+                
+                # DÜZELTME: Sadece gerçekten plaka bulunduğunda fotoğrafı kopyala ve paneli güncelle
                 if results:
+                    shutil.copy(GECICI_RESIM, SON_GECIS_RESIM)
+                    
                     okunan_plaka = results[0].get("plate", "").upper()
                     print(f"\n[KAMERA GÖRDÜ] Okunan Plaka: {okunan_plaka}")
                     
@@ -226,16 +227,15 @@ def plaka_kontrol_et():
                         return True
                     else:
                         sistem_durumu["durum"] = "REDDEDİLDİ (Kayıtsız Plaka)"
-                else:
-                    sistem_durumu["son_plaka"] = "Okunamadı"
-                    sistem_durumu["durum"] = "Plaka Tespit Edilemedi"
+                        
+                # Eğer fotoda plaka yoksa, pas geç. Site boşu boşuna güncellenmez.
         except Exception as e:
             print(f"[HATA] Bağlantı veya API Hatası: {e}")
             
     return False
 
 def main():
-    global global_komut # Dışarıdan gelen web komutunu okumak için
+    global global_komut
     
     print("==================================================")
     print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
@@ -251,7 +251,6 @@ def main():
         while True:
             manuel_acildi = False
             
-            # 1. Kontrol: Web'den manuel açma komutu geldi mi?
             if global_komut == "AC":
                 manuel_acildi = True
                 global_komut = None
@@ -260,7 +259,6 @@ def main():
                 sistem_durumu["son_zaman"] = time.strftime("%H:%M:%S")
                 sistem_durumu["durum"] = "WEB PANELİNDEN AÇILDI"
             else:
-                # 2. Kontrol: Manuel komut yoksa normal plaka izlemeye devam et
                 print("\r[SİSTEM] Yeni araç bekleniyor...", end="", flush=True)
                 if not plaka_kontrol_et():
                     time.sleep(0.5) 
@@ -275,23 +273,20 @@ def main():
             while kapi_acik:
                 print("[SİSTEM] 10 Sn otomatik bekleme başladı (Web'den hemen kapatabilirsiniz)...")
                 
-                # YENİ: 10 Saniyeyi 1'er saniyelik bloklara böldük ki manuel komut gelirse hemen yakalayalım
                 for _ in range(10):
                     if global_komut == "KAPAT":
                         print("\n[WEB] Manuel KAPATMA komutu tetiklendi, 10sn iptal edildi!")
                         global_komut = None
-                        break # Döngüyü kır ve hemen kapatmaya geç
+                        break 
                     time.sleep(1)
                 
-                # Araba kapının altında durduğu sürece
                 while ldr.value == LDR_ARABA_VAR:
                     print("[UYARI] Süre doldu ama araç hala kapının altında! Bekleniyor...")
                     time.sleep(2)
                     if global_komut == "KAPAT":
                         print("[WEB] Güvenlik İhlali: Araç varken manuel KAPANAMAZ!")
-                        global_komut = None # İptal et
+                        global_komut = None 
                 
-                # Araba altından çekildiyse döngü kırılır ve buraya geçilir
                 print("[SİSTEM] Lazer hattı temiz. Kapı kapatılmaya başlanıyor...")
                 if kapiyi_kapat():
                     print("[SİSTEM] Kapı başarıyla kapandı.")
