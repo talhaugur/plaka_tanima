@@ -8,7 +8,6 @@ from gpiozero import OutputDevice, DigitalInputDevice
 API_TOKEN = "e8dbc6b3a35577a8af907c118920c24ae404d3bb" 
 
 # --- STEP MOTOR AYARLARI ---
-# ULN2003 motor sürücü kartının pinleri
 PIN_IN1 = 18
 PIN_IN2 = 23
 PIN_IN3 = 24
@@ -21,7 +20,6 @@ step_pins = [
     OutputDevice(PIN_IN4)
 ]
 
-# 28BYJ-48 motoru için yarım adım (Half-step) dizilimi (En pürüzsüz dönüş)
 step_sequence = [
     [1,0,0,0],
     [1,1,0,0],
@@ -34,10 +32,9 @@ step_sequence = [
 ]
 
 # Kalibrasyon Ayarları: 
-# 28BYJ-48 tam turu (360 derece) 4096 adımdır. Çeyrek tur (90 derece) = 1024 adım.
-# Eğer kapı 90 dereceyi biraz geçerse bu değeri 1000 yap, eksik kalırsa 1050 yap.
-ADIM_90_DERECE = 1024 
-MOTOR_HIZI = 0.001 # Adımlar arası bekleme süresi (Küçüldükçe bariyer hızlanır)
+# Eğer hala fazla dönüyorsa bu değeri 500 veya 480 yap. Eksik dönüyorsa 550 yap.
+ADIM_90_DERECE = 512 
+MOTOR_HIZI = 0.001 
 
 # --- SENSÖR AYARLARI ---
 LDR_PIN = 17
@@ -47,11 +44,20 @@ ldr = DigitalInputDevice(LDR_PIN)
 GECERLI_PLAKA = "02ABG585"
 GECICI_RESIM = "plaka.jpg"
 
-def motoru_dondur(adim_sayisi, yon):
-    """yon: 1 ise açılma (saat yönü), -1 ise kapanma (tersi)"""
+def motoru_dondur(adim_sayisi, yon, guvenlik_kontrolu=False):
+    """
+    yon: 1 ise açılma (saat yönü), -1 ise kapanma.
+    guvenlik_kontrolu: True ise adım atarken LDR'yi kontrol eder.
+    Geri dönüş değeri: Eğer hareket tamamlansa True, güvenlik sebebiyle iptal olursa atılan_adim_sayisi döner.
+    """
+    atilan_adim = 0
     for _ in range(adim_sayisi):
+        # Eğer güvenlik kontrolü açıksa ve lazer kesildiyse (LDR == 1) hareketi durdur
+        if guvenlik_kontrolu and ldr.value == 1:
+            print("[ACİL DURUM] Kapanırken araç algılandı! Hareket durduruluyor...")
+            return atilan_adim # Kaç adım inmişse onu döndür ki o kadar geri çıksın
+
         for step in range(8):
-            # Yöne göre dizilimde ileri veya geri gidiyoruz
             seq_index = step if yon == 1 else (7 - step)
             for pin_num in range(4):
                 if step_sequence[seq_index][pin_num] == 1:
@@ -59,19 +65,31 @@ def motoru_dondur(adim_sayisi, yon):
                 else:
                     step_pins[pin_num].off()
             time.sleep(MOTOR_HIZI)
+        atilan_adim += 1
+        
+    return True # Hareket sorunsuz tamamlandı
 
 def kapiyi_ac():
     print("\n[STEP MOTOR] Bariyer pürüzsüzce 90 derece YUKARI kaldırılıyor...")
     motoru_dondur(ADIM_90_DERECE, yon=1)
-    # Motor açık pozisyonda beklerken kolun düşmemesi için enerjiyi kesmiyoruz (tutunma torku devrede)
 
 def kapiyi_kapat():
     print("[STEP MOTOR] Güvenli. Bariyer pürüzsüzce AŞAĞI indiriliyor...")
-    motoru_dondur(ADIM_90_DERECE, yon=-1)
     
-    # Motor kapalı pozisyondayken ısınıp bozulmaması için tüm pinlerin enerjisini kesiyoruz
+    # Kapanırken güvenlik kontrolünü (LDR takibini) aktif ediyoruz
+    sonuc = motoru_dondur(ADIM_90_DERECE, yon=-1, guvenlik_kontrolu=True)
+    
+    # Eğer sonuc True değilse, kapı tam kapanamadan araya biri girmiş demektir
+    if sonuc is not True:
+        # İnilen adım sayısı kadar geri yukarı (yon=1) çık
+        print("[GÜVENLİK] Kapı çarpmasını önlemek için tekrar AÇILIYOR!")
+        motoru_dondur(sonuc, yon=1) 
+        return False # Kapı kapanamadı bilgisini ana döngüye gönder
+    
+    # Sorunsuz kapandıysa motorun enerjisini kes
     for pin in step_pins:
         pin.off()
+    return True # Kapı başarıyla kapandı
 
 # === KAMERA VE YAPAY ZEKA KISMI (HİÇ DOKUNULMADI) ===
 def plaka_kontrol_et():
@@ -129,7 +147,6 @@ def main():
     print("===  Step Motorlu Profesyonel Bariyer Sistemi  ===")
     print("==================================================")
     
-    # Motorun mevcut konumunu "kapalı" (sıfır noktası) olarak kabul et
     for pin in step_pins:
         pin.off()
     
@@ -151,29 +168,39 @@ def main():
             kapiyi_ac()
             time.sleep(1) 
 
-            print("[GÜVENLİK] Lazer hattı devrede, araç geçişi izleniyor...")
-            
-            while True:
-                if ldr.value == 0:
-                    print("[UYARI] Araç algılandı (Lazer Hattı Kesik)! Kapı KAPANAMAZ.")
-                else:
-                    print("[TEMİZ] Lazer hattı net. Araç geçti veya alan boş.")
-                    print("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...")
-                    time.sleep(2)
-                    
-                    if ldr.value == 1:
-                        break 
+            # Araç tamamen geçene kadar kapıyı açık tutan ana kontrol döngüsü
+            kapi_acik = True
+            while kapi_acik:
+                print("[GÜVENLİK] Lazer hattı devrede, araç geçişi izleniyor...")
                 
-                time.sleep(0.1)
+                while True:
+                    if ldr.value == 1:
+                        print("[UYARI] Araç algılandı (Lazer Hattı Kesik)! Kapı KAPANAMAZ.")
+                    else:
+                        print("[TEMİZ] Lazer hattı net. Araç geçti veya alan boş.")
+                        print("[SİSTEM] Kapı kapatılmak üzere geri sayım: 2 saniye...")
+                        time.sleep(2)
+                        
+                        if ldr.value == 0:
+                            break 
+                    
+                    time.sleep(0.1)
 
-            kapiyi_kapat()
+                # Araç geçti sanıp kapıyı kapatmayı deniyoruz
+                if kapiyi_kapat():
+                    kapi_acik = False # Kapı başarıyla kapandı, ana döngüden çık
+                else:
+                    # Kapı kapanırken araya biri girdi ve kapı geri açıldı!
+                    # Bu yüzden kapi_acik = True kalacak ve sistem aracın çekilmesini beklemeye devam edecek.
+                    print("[SİSTEM] Lütfen bariyerin altını boşaltın!")
+                    time.sleep(2)
+
             time.sleep(1)
             print("[SİSTEM] Araç başarıyla geçti. Sistem sıfırlandı.")
 
     except KeyboardInterrupt:
         print("\n[SİSTEM] Program kapatılıyor...")
     finally:
-        # Kapatırken motorun enerjisini kes
         for pin in step_pins:
             pin.off()
         subprocess.run("pkill rpicam-vid", shell=True)
