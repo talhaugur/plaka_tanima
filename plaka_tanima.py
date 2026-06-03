@@ -233,7 +233,7 @@ def main():
                 time.sleep(10) # Lazerden bağımsız dümdüz 10 saniye bekler
                 
                 # 10 saniye dolduktan sonra, eğer o anda araba kapının tam altındaysa hiç kapanmaya başlama
-                if ldr.value == 0:
+                if ldr.value == 1:
                     print("[UYARI] Süre doldu ama araç kapının altında! 5 Saniye ek süre veriliyor...")
                     time.sleep(5)
                     continue
