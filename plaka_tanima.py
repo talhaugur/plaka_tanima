@@ -214,37 +214,51 @@ def kapiyi_kapat():
     return True
 
 def motor_thread():
-    """
-    Sadece event'leri dinler ve motoru sürer.
-    Sensör/web thread'lerinden bağımsız çalışır.
-    """
     while True:
-        # Açma sinyali geldi mi?
-        if kapi_ac_event.wait(timeout=0.1):
-            kapi_ac_event.clear()
-            print("\n[MOTOR] Kapı açılıyor...")
-            kapiyi_ac()
-            kapi_acik_event.set()   # "Kapı şu an açık" bayrağı
+        if not kapi_ac_event.wait(timeout=0.1):
+            continue
 
-            # 10 saniye veya manuel kapat komutu bekle
-            bekleme_suresi = 10
-            kapi_kapat_event.wait(timeout=bekleme_suresi)
-            kapi_kapat_event.clear()
+        kapi_ac_event.clear()
+        print("\n[MOTOR] Kapi aciliyor...")
+        kapiyi_ac()
+        kapi_acik_event.set()
 
-            # Araç geçene kadar bekle
+        # 10 saniye bekle veya erken kapat komutu gel
+        print("[MOTOR] 10 sn bekleniyor...")
+        kapi_kapat_event.wait(timeout=10)
+        kapi_kapat_event.clear()
+
+        # Kapanma döngüsü — başarılı kapanana kadar tekrar dener
+        while True:
+            # Önce lazer hattı temizlenene kadar bekle
             while ldr.value == LDR_ARABA_VAR:
-                print("[UYARI] Araç hala kapıda, bekleniyor...")
-                time.sleep(2)
+                print("[UYARI] Arac kapida, bekleniyor...")
+                time.sleep(1)
+                if kapi_kapat_event.is_set():
+                    kapi_kapat_event.clear()
 
-            # Kapat
-            print("[MOTOR] Kapı kapatılıyor...")
+            # Lazer temiz — 3 saniye daha bekle, emin ol
+            print("[MOTOR] Lazer temiz, 3 sn bekleniyor...")
+            time.sleep(3)
+
+            # 3 saniye sonra hala temiz mi?
+            if ldr.value == LDR_ARABA_VAR:
+                print("[UYARI] Arac tekrar geldi, beklemeye devam...")
+                continue  # Başa dön, tekrar bekle
+
+            # Temiz, kapatmayı dene
+            print("[MOTOR] Kapatiliyor...")
             if kapiyi_kapat():
-                print("[MOTOR] Kapı kapandı.")
+                print("[MOTOR] Kapi kapandi.")
+                break  # Başarılı, döngüden çık
             else:
-                print("[MOTOR] Güvenlik ihlali, tekrar açık kalacak.")
-                continue   # Döngü başa döner, tekrar kapanmayı bekler
+                # Kapanma sırasında biri geçti
+                # kapiyi_kapat() zaten geri açtı
+                print("[MOTOR] Gecis algilandi! 5 sn sonra tekrar denenecek...")
+                time.sleep(5)  # 5 saniye bekle, tekrar dene
+                # while True döngüsü başa döner
 
-            kapi_acik_event.clear()
+        kapi_acik_event.clear()
 
 # ══════════════════════════════════════════════════════════════
 # MAIN — Thread'leri başlat
