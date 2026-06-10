@@ -68,6 +68,9 @@ if not os.path.exists(PLAKA_DOSYASI):
 # ══════════════════════════════════════════════════════════════
 app = Flask(__name__)
 HTML_SABLON = """ ... """   # Aynı HTML, değişmedi
+@app.route("/test")
+def test():
+    return "Flask calisiyor"
 
 @app.route("/")
 def index():
