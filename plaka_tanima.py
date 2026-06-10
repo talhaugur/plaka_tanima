@@ -3,6 +3,7 @@ import subprocess
 import time
 import requests
 import shutil
+import os
 from threading import Thread
 from flask import Flask, request, render_template_string, send_file
 from gpiozero import OutputDevice, DigitalInputDevice
@@ -235,12 +236,22 @@ def plaka_kontrol_et():
     return False
 
 def main():
-    global global_komut
-    
-    print("==================================================")
-    print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
-    print("==================================================")
-    
+global global_komut
+    
+    # --- RTOS ÖNCELİKLENDİRME (SCHED_FIFO) ---
+    try:
+        # Mevcut sürecin (PID 0) önceliğini gerçek zamanlı (SCHED_FIFO) ve en yüksek (99) seviyeye çekiyoruz.
+        param = os.sched_param(99)
+        os.sched_setscheduler(0, os.SCHED_FIFO, param)
+        print("[RTOS] Sistem SCHED_FIFO gerçek zamanlı görev (Real-Time Task) önceliğine alındı.")
+    except Exception as e:
+        print(f"[UYARI] RTOS önceliği reddedildi (Sudo ile çalıştırın!): {e}")
+    # ----------------------------------------
+
+    print("==================================================")
+    print("=== Turbo Hızlandırılmış Bariyer Sistemi Aktif ===")
+    print("==================================================")
+
     Thread(target=web_sunucusunu_baslat, daemon=True).start()
     for pin in step_pins: pin.off()
     
