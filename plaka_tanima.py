@@ -72,19 +72,53 @@ HTML_SABLON = """
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Bariyer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Akıllı Bariyer Paneli</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; color: #333; text-align: center; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto 20px auto; }
+        img { max-width: 100%; border-radius: 8px; border: 2px solid #ddd; }
+        .btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block;}
+        .btn-mavi { background: #007bff; }
+        .btn-gri { background: #6c757d; }
+        .btn-sil { background: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 14px; }
+        input { padding: 10px; width: 60%; border: 1px solid #ccc; border-radius: 5px; }
+        ul { list-style: none; padding: 0; }
+        li { background: #e9ecef; margin: 5px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; }
+        .durum { font-size: 18px; font-weight: bold; color: #0056b3; }
+        .buton-grubu { display: flex; justify-content: space-around; margin-top: 15px; }
+    </style>
 </head>
 <body>
-    <h1>{{ sistem_durumu['durum'] }}</h1>
-    <p>{{ sistem_durumu['son_plaka'] }}</p>
-    <p>{{ sistem_durumu['son_zaman'] }}</p>
-    <a href="/manuel/ac">Ac</a>
-    <a href="/manuel/kapat">Kapat</a>
-    <ul>
-    {% for p in plakalar %}
-        <li>{{ p }}</li>
-    {% endfor %}
-    </ul>
+    <h2>Akıllı Bariyer Yönetim Paneli</h2>
+    
+    <div class="card">
+        <h3>Manuel Kapı Kontrolü</h3>
+        <div class="buton-grubu">
+            <a href="/manuel/ac" class="btn btn-mavi">⬆️ Kapıyı Aç</a>
+            <a href="/manuel/kapat" class="btn btn-gri">⬇️ Kapıyı Kapat</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Son İşlem Gören Araç</h3>
+        <p class="durum">{{ sistem_durumu['durum'] }}</p>
+        <p><b>Plaka:</b> {{ sistem_durumu['son_plaka'] }} <br> <b>Saat:</b> {{ sistem_durumu['son_zaman'] }}</p>
+        <img src="/foto?{{ rand }}" alt="Son Araç Fotoğrafı">
+    </div>
+    
+    <div class="card">
+        <h3>İzinli Plakalar Listesi</h3>
+        <ul>
+            {% for p in plakalar %}
+                <li>{{ p }} <a href="/sil/{{ p }}" class="btn-sil">Sil</a></li>
+            {% endfor %}
+        </ul>
+        <form action="/ekle" method="POST" style="margin-top: 15px;">
+            <input type="text" name="yeni_plaka" placeholder="Örn: 34ABC123" required>
+            <button type="submit" class="btn">Plaka Ekle</button>
+        </form>
+    </div>
 </body>
 </html>
 """
