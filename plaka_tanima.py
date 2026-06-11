@@ -67,7 +67,27 @@ if not os.path.exists(PLAKA_DOSYASI):
 # THREAD 1 — FLASK WEB SUNUCUSU
 # ══════════════════════════════════════════════════════════════
 app = Flask(__name__)
-HTML_SABLON = """ ... """   # Aynı HTML, değişmedi
+HTML_SABLON = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Bariyer</title>
+</head>
+<body>
+    <h1>{{ sistem_durumu['durum'] }}</h1>
+    <p>{{ sistem_durumu['son_plaka'] }}</p>
+    <p>{{ sistem_durumu['son_zaman'] }}</p>
+    <a href="/manuel/ac">Ac</a>
+    <a href="/manuel/kapat">Kapat</a>
+    <ul>
+    {% for p in plakalar %}
+        <li>{{ p }}</li>
+    {% endfor %}
+    </ul>
+</body>
+</html>
+"""
 @app.route("/test")
 def test():
     return "Flask calisiyor"
