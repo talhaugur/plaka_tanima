@@ -74,12 +74,15 @@ def test():
 
 @app.route("/")
 def index():
-    return render_template_string(
-        HTML_SABLON,
-        plakalar=plaka_listesini_getir(),
-        sistem_durumu=sistem_durumu,
-        rand=time.time()
-    )
+    try:
+        return render_template_string(
+            HTML_SABLON,
+            plakalar=plaka_listesini_getir(),
+            sistem_durumu=sistem_durumu,
+            rand=time.time()
+        )
+    except Exception as e:
+        return f"HATA: {str(e)}", 500
 
 @app.route("/foto")
 def foto():
