@@ -5,7 +5,7 @@ from flask import Flask, request, render_template_string, send_file
 from gpiozero import OutputDevice, DigitalInputDevice
 
 # ─── KONFİGÜRASYON ────────────────────────────────────────────
-API_TOKEN       = "e8dbc6b3a35577a8af907c118920c24ae404d3bb"
+API_TOKEN       = "Buraya api token girin"
 PIN_IN1, PIN_IN2, PIN_IN3, PIN_IN4 = 18, 23, 24, 25
 ADIM_90_DERECE  = 128
 MOTOR_HIZI      = 0.0025
